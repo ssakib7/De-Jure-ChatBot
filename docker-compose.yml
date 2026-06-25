@@ -1,0 +1,10 @@
+services:
+  bot:
+    build: .
+    image: dejure-fb-bot
+    container_name: dejure-fb-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-3000}:3000"
