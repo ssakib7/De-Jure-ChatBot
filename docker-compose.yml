@@ -1,31 +1,4 @@
 services:
-  traefik:
-    image: traefik:v3.3
-    container_name: traefik
-    restart: unless-stopped
-    command:
-      # Discover containers, but only route ones that opt in via labels.
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      # HTTP + HTTPS entrypoints; redirect all plain HTTP to HTTPS.
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      # Let's Encrypt via HTTP-01 challenge (no DNS API credentials needed).
-      - --certificatesresolvers.le.acme.httpchallenge=true
-      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
-      - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
-      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      # Persist issued certificates across restarts.
-      - ./letsencrypt:/letsencrypt
-      # Read-only access so Traefik can watch container labels.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-
   bot:
     build: .
     image: dejure-fb-bot
@@ -33,11 +6,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    expose:
-      - "3000"
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.bot.rule=Host(`${BOT_DOMAIN}`)
-      - traefik.http.routers.bot.entrypoints=websecure
-      - traefik.http.routers.bot.tls.certresolver=le
-      - traefik.http.services.bot.loadbalancer.server.port=3000
+    # Bind to localhost only — the host's nginx reverse-proxies to it and
+    # terminates TLS. Host port 3001 because 3000 is used by the Next.js app.
+    ports:
+      - "127.0.0.1:3001:3000"
