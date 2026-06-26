@@ -177,13 +177,13 @@ const PAGE_STYLE = `
     width: 30px; height: 30px; padding: 0; line-height: 1; font-size: 14px; border-radius: 6px; }
   .icon-btn:hover { background: #fbeeea; color: var(--red); border-color: #ecd2ca; }
 
-  /* Sticky save bar — aligned to content, clears the sidebar */
-  .savebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+  /* Sticky save bar — starts after the sidebar so it never covers the Log out button */
+  .savebar { position: fixed; left: 248px; right: 0; bottom: 0; z-index: 25;
     background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border-top: 1px solid var(--line); }
-  .savebar-inner { padding: 12px 44px 12px 292px; display: flex; align-items: center; gap: 14px; }
+  .savebar-inner { padding: 12px 44px; display: flex; align-items: center; gap: 14px; }
   .savebar .note { color: var(--muted); font-size: 13px; }
   .savebar .spacer { flex: 1; }
-  @media (max-width: 860px) { .savebar-inner { padding: 12px 18px; } }
+  @media (max-width: 860px) { .savebar { left: 0; } .savebar-inner { padding: 12px 18px; } }
 
   /* Flash */
   .flash { display: flex; align-items: center; gap: 9px; background: var(--ok-bg);

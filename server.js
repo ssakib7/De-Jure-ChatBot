@@ -160,6 +160,11 @@ async function handleMessagingEvent(event) {
     return;
   }
 
+  // Mark the message as seen and show the typing bubble while Gemini thinks.
+  // The bubble clears automatically once we send the reply (or after ~20s).
+  await sendAction(senderId, "mark_seen");
+  await sendAction(senderId, "typing_on");
+
   const reply = await askGemini(senderId, message.text);
   await sendMessage(senderId, reply);
 }
@@ -193,6 +198,25 @@ async function askGemini(senderId, userText) {
     console.error("Gemini API error:", err);
     // Don't store failed turns, so a transient error doesn't pollute history.
     return "দুঃখিত, এই মুহূর্তে উত্তর দিতে পারছি না। একটু পরে আবার চেষ্টা করুন।";
+  }
+}
+
+// Send a sender action (mark_seen / typing_on / typing_off) to the Messenger user.
+async function sendAction(recipientId, action) {
+  try {
+    const res = await fetch(`${GRAPH_API}/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: { id: recipientId },
+        sender_action: action,
+      }),
+    });
+    if (!res.ok) {
+      console.error("Sender action error:", action, res.status, await res.text());
+    }
+  } catch (err) {
+    console.error("Sender action request failed:", err);
   }
 }
 
