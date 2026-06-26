@@ -1,7 +1,7 @@
 # De Jure Academy — Knowledge Base
 
 > Source of truth for the Facebook Messenger AI auto-reply bot.
-> Snapshot generated from api.dejureacademy.com on 2026-06-24. Regenerate when prices/courses change.
+> Generated from knowledge_base.json via the /admin panel. Edit there, not here.
 
 ## About
 De Jure Academy (ডি জুরি একাডেমি) is a Bangladesh law-education platform founded in **2021**,
@@ -27,7 +27,7 @@ the **Bangladesh Bar Council** enrollment (advocate) exam, through **online** an
 বাংলাদেশকে এমন এক প্রজন্মের আইনজীবী, বিচারক ও আইনপেশাজীবী উপহার দেওয়া যারা শুধু পরীক্ষায় নয়,
 ন্যায়বিচার প্রতিষ্ঠায়ও নেতৃত্ব দেবে।
 
-## Contact   <!-- TODO: fill these in before going live -->
+## Contact
 - Phone / WhatsApp: TODO
 - Email: TODO
 - Address / Campus: TODO
@@ -65,10 +65,10 @@ Seats are limited per batch.
 - **Free e-books**: Law Student's Survival Guide; আইনের আলোকে ৫০০ প্রেরণাদায়ী উক্তি;
   500 Quotes on Law and Justice; previous-year BJS Q&A sets (Math, Science, GK, English, Bangla)
 
-## How to enroll / pay   <!-- TODO: confirm exact process with the business -->
+## How to enroll / pay
 Enroll through the website https://dejureacademy.com — browse the course, choose the mode
 (online / offline / both), and complete payment. For help with enrollment, payment, or batch
-details, direct the customer to TODO(phone/WhatsApp) or the Facebook page inbox for a human.
+details, direct the customer to the phone/WhatsApp number above or the Facebook page inbox for a human.
 
 ## Answering rules (instructions to the AI)
 - Answer **only** using facts in this document. If asked something not covered here (exact batch

@@ -1,11 +1,11 @@
-import fs from "node:fs";
 import crypto from "node:crypto";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import express from "express";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
+
+import { loadKb, buildSystemPrompt } from "./kb.js";
+import { createAdminRouter } from "./admin.js";
 
 dotenv.config();
 
@@ -14,6 +14,9 @@ const {
   APP_SECRET,
   VERIFY_TOKEN,
   GEMINI_API_KEY,
+  ADMIN_USERNAME,
+  ADMIN_PASSWORD,
+  SESSION_SECRET,
   PORT = 3000,
 } = process.env;
 
@@ -23,6 +26,9 @@ for (const [name, value] of Object.entries({
   APP_SECRET,
   VERIFY_TOKEN,
   GEMINI_API_KEY,
+  ADMIN_USERNAME,
+  ADMIN_PASSWORD,
+  SESSION_SECRET,
 })) {
   if (!value) {
     console.error(`Missing required env var: ${name}. Copy .env.example to .env and fill it in.`);
@@ -33,40 +39,15 @@ for (const [name, value] of Object.entries({
 const GRAPH_API = "https://graph.facebook.com/v21.0";
 const MODEL = "gemini-3.1-flash-lite"; // fast + cheap, ideal for short FAQ replies
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Build the AI's system prompt from the knowledge base. `let` so the admin panel can hot-reload it.
+let systemPrompt = buildSystemPrompt(loadKb());
 
-// Load the knowledge base once at startup; it becomes the AI's source of truth.
-const knowledgeBase = fs.readFileSync(path.join(__dirname, "knowledge_base.md"), "utf8");
-
-const SYSTEM_PROMPT = `You are a real, friendly member of the De Jure Academy support team replying to \
-customers in the Facebook Page inbox. De Jure Academy is a Bangladesh law-education platform (BJS Judicial \
-Service and Bar Council exam preparation). Chat the way a warm, helpful human page admin would on Messenger \
-— never like a brochure or a bot.
-
-How to write:
-- ALWAYS reply in Bengali (Bangla), even if the customer writes in English. (Official course names may keep \
-their original spelling as in the knowledge base.)
-- Sound like a real person: warm, natural, conversational. Keep replies SHORT — usually 1–3 sentences. \
-Get to the point.
-- Do NOT greet or welcome the customer UNLESS their current message is itself a greeting (e.g. they wrote \
-"আসসালামু আলাইকুম", "হ্যালো", "hi", "hello"). For any normal question or request — like asking about a course, \
-price, or schedule — answer DIRECTLY with no greeting and no welcome line. NEVER use "নমস্কার". \
-(Note: you have no memory of past messages, so never assume whether this is the first message — decide purely \
-from whether THIS message is a greeting.)
-- Use a numbered/bulleted list ONLY when you are actually listing several courses or prices. For a single \
-course or a short answer, write it as a normal sentence or two, not a formatted list.
-- When a price has both a regular and an offer price, lead with the current offer price. Use ৳ for amounts.
-
-What to answer:
-- Answer ONLY using facts in the knowledge base below. NEVER invent prices, dates, guarantees, course names, \
-phone numbers, or anything not written there.
-- Only offer to connect the customer to a human or share contact details when you genuinely CANNOT answer from \
-the knowledge base — e.g. exact payment steps, a personal account/payment status, refunds, or a schedule that \
-isn't listed. If you have already fully answered the question, do NOT tack on a "we'll connect you to a \
-representative" line — just answer warmly and stop.
-
-=== KNOWLEDGE BASE ===
-${knowledgeBase}`;
+// Re-read knowledge_base.json and rebuild the prompt — called after an admin saves an edit,
+// so new replies use the new data without restarting the bot.
+function reloadKb() {
+  systemPrompt = buildSystemPrompt(loadKb());
+  console.log("Knowledge base reloaded from admin edit.");
+}
 
 const genai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
@@ -105,6 +86,20 @@ app.use(
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
+  })
+);
+
+// Parse form posts from the admin panel (the webhook stays JSON above).
+app.use(express.urlencoded({ extended: true }));
+
+// Admin web panel for editing the knowledge base (login-protected).
+app.use(
+  "/admin",
+  createAdminRouter({
+    adminUsername: ADMIN_USERNAME,
+    adminPassword: ADMIN_PASSWORD,
+    sessionSecret: SESSION_SECRET,
+    onSaved: reloadKb,
   })
 );
 
@@ -180,7 +175,7 @@ async function askGemini(senderId, userText) {
       model: MODEL,
       contents,
       config: {
-        systemInstruction: SYSTEM_PROMPT,
+        systemInstruction: systemPrompt,
         maxOutputTokens: 1024,
       },
     });

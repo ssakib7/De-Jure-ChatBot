@@ -8,8 +8,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-# Copy the rest of the application source.
-COPY server.js knowledge_base.md ./
+# Copy the application source and the knowledge base data.
+# knowledge_base.json is the canonical source of truth; the .md is generated from it.
+# In production, mount knowledge_base.json as a volume so /admin edits persist (see docker-compose.yml).
+COPY server.js kb.js admin.js knowledge_base.json knowledge_base.md ./
 
 ENV NODE_ENV=production
 ENV PORT=3000

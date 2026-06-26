@@ -10,3 +10,9 @@ services:
     # terminates TLS. Host port 3005 because 3000/3001 are used by Next.js apps.
     ports:
       - "127.0.0.1:3005:3000"
+    # Persist /admin edits across redeploys: the knowledge base data lives on the host,
+    # not baked into the image. The container's `node` user must be able to write these,
+    # so make the host files world-writable (or owned by uid 1000): chmod 666 knowledge_base.*
+    volumes:
+      - ./knowledge_base.json:/app/knowledge_base.json
+      - ./knowledge_base.md:/app/knowledge_base.md
