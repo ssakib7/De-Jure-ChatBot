@@ -6,6 +6,7 @@ import { GoogleGenAI } from "@google/genai";
 
 import { loadKb, buildSystemPrompt } from "./kb.js";
 import { createAdminRouter } from "./admin.js";
+import { isLeadConfigured, saveLead } from "./lead.js";
 
 dotenv.config();
 
@@ -39,13 +40,29 @@ for (const [name, value] of Object.entries({
 const GRAPH_API = "https://graph.facebook.com/v21.0";
 const MODEL = "gemini-3.1-flash-lite"; // fast + cheap, ideal for short FAQ replies
 
+const LEADS_ON = isLeadConfigured();
+
+// Appended to the prompt only when lead capture is configured: lets Gemini flag, with a
+// hidden marker, the moments a human follow-up makes sense (enroll / payment / wants a person).
+const LEAD_MARKER = "[[LEAD]]";
+const LEAD_INSTRUCTION = `
+
+=== LEAD CAPTURE ===
+If the customer clearly wants to enroll, asks how to pay/admit, or asks to talk to a person — and you \
+cannot fully complete that for them from the knowledge base — append a final line containing EXACTLY \
+${LEAD_MARKER} and nothing else. Still answer their question warmly above that line. Never mention or \
+explain this marker to the customer, and never use it more than once in a conversation.`;
+
 // Build the AI's system prompt from the knowledge base. `let` so the admin panel can hot-reload it.
-let systemPrompt = buildSystemPrompt(loadKb());
+function buildPrompt() {
+  return buildSystemPrompt(loadKb()) + (LEADS_ON ? LEAD_INSTRUCTION : "");
+}
+let systemPrompt = buildPrompt();
 
 // Re-read knowledge_base.json and rebuild the prompt — called after an admin saves an edit,
 // so new replies use the new data without restarting the bot.
 function reloadKb() {
-  systemPrompt = buildSystemPrompt(loadKb());
+  systemPrompt = buildPrompt();
   console.log("Knowledge base reloaded from admin edit.");
 }
 
@@ -56,13 +73,20 @@ const genai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 // Note: this lives in process memory, so it resets if the server restarts.
 const SESSION_TTL_MS = 30 * 60 * 1000; // forget a conversation after 30 min idle
 const MAX_HISTORY = 10; // keep the last 10 messages (~5 exchanges) per customer
-const sessions = new Map(); // senderId -> { history: Content[], lastActive: number }
+// senderId -> { history: Content[], lastActive: number, lead: {...} }
+const sessions = new Map();
+
+// Fresh per-conversation lead state. `stage` drives the capture flow:
+//   null -> not collecting · "name" -> waiting for name · "phone" -> waiting for phone.
+function freshLead() {
+  return { stage: null, name: null, asked: false, captured: false };
+}
 
 function getSession(senderId) {
   const now = Date.now();
   const existing = sessions.get(senderId);
   if (!existing || now - existing.lastActive > SESSION_TTL_MS) {
-    const fresh = { history: [], lastActive: now };
+    const fresh = { history: [], lastActive: now, lead: freshLead() };
     sessions.set(senderId, fresh);
     return fresh;
   }
@@ -160,17 +184,96 @@ async function handleMessagingEvent(event) {
     return;
   }
 
-  // Mark the message as seen and show the typing bubble while Gemini thinks.
-  // The bubble clears automatically once we send the reply (or after ~20s).
+  const session = getSession(senderId);
   await sendAction(senderId, "mark_seen");
-  await sendAction(senderId, "typing_on");
 
-  const reply = await askGemini(senderId, message.text);
-  await sendMessage(senderId, reply);
+  // If we're mid lead-capture, this message is the customer's name or phone — handle it
+  // directly and skip the AI for this turn.
+  if (LEADS_ON && session.lead.stage) {
+    await handleLeadCapture(senderId, session, message.text);
+    return;
+  }
+
+  // Show the typing bubble while Gemini thinks; it clears when we send the reply.
+  await sendAction(senderId, "typing_on");
+  const { text, wantsLead } = await askGemini(session, message.text);
+  await sendMessage(senderId, text);
+
+  // Gemini flagged buying/contact intent — start collecting name + phone (once per chat).
+  if (LEADS_ON && wantsLead && !session.lead.asked && !session.lead.captured) {
+    session.lead.asked = true;
+    session.lead.stage = "name";
+    await sendMessage(
+      senderId,
+      "আপনি চাইলে আমাদের একজন প্রতিনিধি আপনার সাথে যোগাযোগ করে বিস্তারিত জানাতে পারেন। অনুগ্রহ করে আপনার নামটি লিখুন।"
+    );
+  }
 }
 
-async function askGemini(senderId, userText) {
-  const session = getSession(senderId);
+// Drive the deterministic name -> phone capture flow. Returns nothing; replies are sent here.
+async function handleLeadCapture(senderId, session, text) {
+  const lead = session.lead;
+  const input = text.trim();
+
+  // Let the customer back out at any point.
+  if (/^(cancel|বাতিল|না|no)$/i.test(input)) {
+    lead.stage = null;
+    await sendMessage(senderId, "ঠিক আছে! আর কোনো প্রশ্ন থাকলে নির্দ্বিধায় জিজ্ঞাসা করুন।");
+    return;
+  }
+
+  if (lead.stage === "name") {
+    if (input.length < 2) {
+      await sendMessage(senderId, "অনুগ্রহ করে আপনার নামটি লিখুন।");
+      return;
+    }
+    lead.name = input;
+    lead.stage = "phone";
+    await sendMessage(senderId, "ধন্যবাদ! এবার আপনার মোবাইল নম্বরটি দিন (যেমন: 01XXXXXXXXX)।");
+    return;
+  }
+
+  if (lead.stage === "phone") {
+    const phone = normalizePhone(input);
+    if (!phone) {
+      await sendMessage(
+        senderId,
+        "নম্বরটি ঠিক বুঝতে পারিনি। অনুগ্রহ করে ১১ সংখ্যার মোবাইল নম্বর দিন (যেমন: 01712345678)।"
+      );
+      return;
+    }
+    lead.phone = phone;
+    lead.stage = null;
+    lead.captured = true;
+
+    await saveLead({
+      name: lead.name,
+      phone,
+      senderId,
+      time: new Date().toISOString(),
+      source: "messenger",
+    });
+
+    await sendMessage(
+      senderId,
+      "ধন্যবাদ! আমাদের প্রতিনিধি খুব শীঘ্রই আপনার সাথে যোগাযোগ করবেন। 😊"
+    );
+  }
+}
+
+// Normalise a Bangladeshi mobile number to 11-digit `01XXXXXXXXX`, or null if invalid.
+// Accepts Bengali digits, +880/880 country codes, and spaces/dashes.
+function normalizePhone(raw) {
+  const bn = "০১২৩৪৫৬৭৮৯";
+  let s = String(raw)
+    .replace(/[০-৯]/g, (d) => bn.indexOf(d)) // Bengali -> ASCII digits
+    .replace(/[^\d+]/g, "")
+    .replace(/^\+/, "");
+  if (s.startsWith("880")) s = "0" + s.slice(3);
+  return /^01\d{9}$/.test(s) ? s : null;
+}
+
+async function askGemini(session, userText) {
   const userTurn = { role: "user", parts: [{ text: userText }] };
   // Send prior turns + this new message so Gemini has the conversation context.
   const contents = [...session.history, userTurn];
@@ -184,20 +287,28 @@ async function askGemini(senderId, userText) {
         maxOutputTokens: 1024,
       },
     });
-    const reply =
+    const raw =
       response.text?.trim() ||
       "দুঃখিত, একটি সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।";
 
-    // Commit this exchange to memory, then trim oldest pairs to the cap.
-    session.history.push(userTurn, { role: "model", parts: [{ text: reply }] });
+    // Gemini appends [[LEAD]] when it senses buying/contact intent. Detect it, then strip
+    // it so the customer never sees the marker.
+    const wantsLead = raw.includes(LEAD_MARKER);
+    const text = raw.replaceAll(LEAD_MARKER, "").trim();
+
+    // Commit the cleaned exchange to memory, then trim oldest pairs to the cap.
+    session.history.push(userTurn, { role: "model", parts: [{ text }] });
     if (session.history.length > MAX_HISTORY) {
       session.history.splice(0, session.history.length - MAX_HISTORY);
     }
-    return reply;
+    return { text, wantsLead };
   } catch (err) {
     console.error("Gemini API error:", err);
     // Don't store failed turns, so a transient error doesn't pollute history.
-    return "দুঃখিত, এই মুহূর্তে উত্তর দিতে পারছি না। একটু পরে আবার চেষ্টা করুন।";
+    return {
+      text: "দুঃখিত, এই মুহূর্তে উত্তর দিতে পারছি না। একটু পরে আবার চেষ্টা করুন।",
+      wantsLead: false,
+    };
   }
 }
 
@@ -254,4 +365,5 @@ function verifySignature(req) {
 
 app.listen(PORT, () => {
   console.log(`De Jure Academy bot listening on http://localhost:${PORT}`);
+  console.log(`Lead capture: ${LEADS_ON ? "enabled" : "disabled (no sheet/WhatsApp configured)"}`);
 });

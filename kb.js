@@ -91,13 +91,21 @@ export function renderMarkdown(kb) {
   lines.push("");
   for (const cat of kb.courseCategories ?? []) {
     lines.push(`### ${cat.name}`);
-    lines.push("| Course | Online | Offline | Online+Offline | Duration | Starts |");
-    lines.push("|---|---|---|---|---|---|");
+    const extraCols = cat.extraColumns ?? [];
+    const headers = ["Course", "Online", "Offline", "Online+Offline", "Duration", "Starts", ...extraCols];
+    lines.push(`| ${headers.join(" | ")} |`);
+    lines.push(`|${headers.map(() => "---").join("|")}|`);
     for (const course of cat.courses ?? []) {
-      lines.push(
-        `| ${course.name} | ${formatPrice(course.online)} | ${formatPrice(course.offline)} | ` +
-          `${formatPrice(course.onlineOffline)} | ${course.duration?.trim() || "—"} | ${course.starts?.trim() || "—"} |`
-      );
+      const cells = [
+        course.name,
+        formatPrice(course.online),
+        formatPrice(course.offline),
+        formatPrice(course.onlineOffline),
+        course.duration?.trim() || "—",
+        course.starts?.trim() || "—",
+        ...extraCols.map((_, k) => (course.extra?.[k] ?? "").trim() || "—"),
+      ];
+      lines.push(`| ${cells.join(" | ")} |`);
     }
     lines.push("");
   }

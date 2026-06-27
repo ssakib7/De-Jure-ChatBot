@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SOJAG AI · লগইন</title>
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+
+  <style>
+    :root {
+      --navy:        #070E1B;
+      --navy-mid:    #0C1929;
+      --navy-card:   rgba(9, 18, 32, 0.88);
+      --orange:      #F5821E;
+      --orange-dim:  rgba(245, 130, 30, 0.22);
+      --cyan:        #00CAFF;
+      --cyan-dim:    rgba(0, 202, 255, 0.18);
+      --white:       #FFFFFF;
+      --silver:      #8BAAC8;
+      --muted:       #3D5A78;
+      --input-bg:    rgba(255,255,255,0.04);
+      --input-bdr:   rgba(255,255,255,0.09);
+      --radius-card: 22px;
+      --radius-inp:  12px;
+      --f-bn:        'Hind Siliguri', sans-serif;
+      --f-lat:       'Inter', sans-serif;
+    }
+
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+    html, body {
+      height: 100%;
+      background: var(--navy);
+      font-family: var(--f-bn);
+      color: var(--white);
+      overflow: hidden;
+    }
+
+    /* ── Animated circuit canvas ── */
+    #cvs {
+      position: fixed;
+      inset: 0;
+      width: 100%; height: 100%;
+      z-index: 0;
+    }
+
+    /* ── Page shell ── */
+    .page {
+      position: relative;
+      z-index: 10;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      overflow-y: auto;
+    }
+
+    /* ── Card ── */
+    .card {
+      width: 100%;
+      max-width: 440px;
+      background: var(--navy-card);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(0, 202, 255, 0.13);
+      border-radius: var(--radius-card);
+      padding: 44px 36px 36px;
+      position: relative;
+      box-shadow:
+        0 2px 0   0 rgba(255,255,255,0.04) inset,
+        0 0 60px  0 rgba(0,0,0,0.6),
+        0 0 120px 0 rgba(0,202,255,0.04);
+      animation: cardIn .55s cubic-bezier(.22,.68,0,1.2) both;
+    }
+
+    @keyframes cardIn {
+      from { opacity:0; transform: translateY(28px) scale(.97); }
+      to   { opacity:1; transform: translateY(0)    scale(1);   }
+    }
+
+    /* top shimmer line */
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 10%; right: 10%; height: 1.5px;
+      background: linear-gradient(90deg,
+        transparent,
+        var(--orange) 30%,
+        var(--cyan)   70%,
+        transparent);
+      border-radius: 0 0 4px 4px;
+    }
+
+    /* ── Logo ── */
+    .logo-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+
+    .logo-box {
+      width: 68px; height: 68px;
+      background: linear-gradient(145deg, #0B1929, #0E2040);
+      border-radius: 17px;
+      border: 1px solid rgba(0, 202, 255, 0.28);
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+      box-shadow:
+        0 0 0 1px rgba(245,130,30,.12),
+        0 0 28px rgba(0,202,255,.12),
+        0 6px 30px rgba(0,0,0,.5);
+    }
+
+    /* corner sparks on logo box */
+    .logo-box::after {
+      content: '';
+      position: absolute;
+      inset: -3px; border-radius: 20px;
+      background: conic-gradient(from 190deg,
+        var(--orange) 0deg 80deg,
+        transparent  80deg 260deg,
+        var(--cyan)  260deg 340deg,
+        transparent  340deg 360deg);
+      z-index: -1;
+      opacity: .55;
+      animation: spin 6s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .logo-brain {
+      font-size: 32px;
+      line-height: 1;
+      filter: drop-shadow(0 0 8px rgba(0,202,255,.6));
+    }
+
+    .logo-name {
+      font-family: var(--f-lat);
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      color: var(--white);
+      display: flex; align-items: center; gap: 3px;
+      line-height: 1;
+    }
+
+    .logo-name .ai { color: var(--cyan); }
+    .logo-name .dot { font-size: 13px; color: var(--orange); margin: 0 1px; }
+
+    .logo-badge {
+      font-family: var(--f-lat);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 2.4px;
+      text-transform: uppercase;
+      color: var(--orange);
+      opacity: .9;
+    }
+
+    /* ── Welcome ── */
+    .welcome {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .welcome h1 {
+      font-size: 23px;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 7px;
+      line-height: 1.35;
+    }
+
+    .welcome p {
+      font-size: 14px;
+      color: var(--silver);
+      line-height: 1.65;
+    }
+
+    .welcome p strong {
+      color: var(--cyan);
+      font-weight: 600;
+    }
+
+    /* ── Form ── */
+    .field { margin-bottom: 18px; }
+
+    .field label {
+      display: block;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--silver);
+      margin-bottom: 7px;
+      padding-left: 2px;
+    }
+
+    .inp-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .inp-icon {
+      position: absolute;
+      left: 14px;
+      color: var(--muted);
+      font-size: 15px;
+      pointer-events: none;
+      transition: color .25s;
+    }
+
+    .inp-wrap:focus-within .inp-icon { color: var(--cyan); }
+
+    input.inp {
+      width: 100%;
+      padding: 13.5px 14px 13.5px 42px;
+      background: var(--input-bg);
+      border: 1px solid var(--input-bdr);
+      border-radius: var(--radius-inp);
+      color: var(--white);
+      font-size: 14.5px;
+      font-family: var(--f-bn);
+      outline: none;
+      transition: border-color .25s, box-shadow .25s, background .25s;
+      -webkit-appearance: none;
+    }
+
+    input.inp::placeholder {
+      color: var(--muted);
+      font-size: 13.5px;
+    }
+
+    input.inp:focus {
+      border-color: var(--cyan);
+      background: rgba(0,202,255,.05);
+      box-shadow: 0 0 0 3px rgba(0,202,255,.15);
+    }
+
+    .inp.pr { padding-right: 44px; }
+
+    .pw-toggle {
+      position: absolute;
+      right: 13px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 15px;
+      padding: 4px;
+      transition: color .25s;
+    }
+
+    .pw-toggle:hover { color: var(--cyan); }
+
+    /* ── Row ── */
+    .row-opts {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 26px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .chk-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 13.5px;
+      color: var(--silver);
+      user-select: none;
+    }
+
+    .chk-label input[type=checkbox] {
+      width: 16px; height: 16px;
+      accent-color: var(--cyan);
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .forgot {
+      font-size: 13.5px;
+      color: var(--cyan);
+      text-decoration: none;
+      transition: color .25s;
+    }
+
+    .forgot:hover { color: var(--orange); }
+
+    /* ── Button ── */
+    .btn-login {
+      width: 100%;
+      padding: 15px;
+      border: none;
+      border-radius: var(--radius-inp);
+      font-family: var(--f-bn);
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--white);
+      cursor: pointer;
+      background: linear-gradient(135deg,
+        var(--orange) 0%,
+        #d96d0e      40%,
+        #0098c0      70%,
+        var(--cyan)  100%);
+      background-size: 250% 250%;
+      animation: btnShift 5s ease infinite;
+      box-shadow: 0 4px 22px rgba(245,130,30,.35);
+      transition: transform .2s, box-shadow .25s;
+      position: relative;
+      overflow: hidden;
+      letter-spacing: .3px;
+    }
+
+    @keyframes btnShift {
+      0%  { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100%{ background-position: 0% 50%; }
+    }
+
+    .btn-login:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px rgba(245,130,30,.4), 0 8px 32px rgba(0,202,255,.2);
+    }
+
+    .btn-login:active { transform: translateY(0); }
+
+    .btn-login:disabled {
+      opacity: .65;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 22px 0;
+    }
+
+    .divider::before, .divider::after {
+      content:'';
+      flex:1;
+      height:1px;
+      background: var(--input-bdr);
+    }
+
+    .divider span {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    /* ── Footer ── */
+    .card-foot {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 13.5px;
+      color: var(--muted);
+    }
+
+    .card-foot a {
+      color: var(--cyan);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .card-foot a:hover { color: var(--orange); }
+
+    /* ── Bottom bar ── */
+    .bottom-bar {
+      margin-top: 20px;
+      text-align: center;
+      font-family: var(--f-lat);
+      font-size: 11.5px;
+      color: var(--muted);
+      letter-spacing: .3px;
+      opacity: .75;
+    }
+
+    /* ── Error state ── */
+    .err-msg {
+      display: none;
+      font-size: 12.5px;
+      color: #ff6b6b;
+      margin-top: 6px;
+      padding-left: 2px;
+    }
+
+    .field.has-error input.inp {
+      border-color: #ff6b6b;
+      box-shadow: 0 0 0 3px rgba(255,107,107,.15);
+    }
+
+    .field.has-error .err-msg { display: block; }
+
+    /* ── Sparkle badge top-right corner ── */
+    .badge-ai {
+      position: absolute;
+      top: 18px; right: 20px;
+      font-family: var(--f-lat);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--cyan);
+      border: 1px solid rgba(0,202,255,.3);
+      border-radius: 20px;
+      padding: 3px 9px;
+      display: flex; align-items: center; gap: 4px;
+      opacity: .8;
+    }
+
+    .badge-ai .dot-pulse {
+      width: 6px; height: 6px;
+      background: var(--cyan);
+      border-radius: 50%;
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity:1; transform: scale(1); }
+      50%       { opacity:.4; transform: scale(.7); }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 480px) {
+      .card { padding: 38px 22px 30px; }
+      .welcome h1 { font-size: 20px; }
+      .btn-login { font-size: 16px; }
+      .row-opts { flex-direction: column; align-items: flex-start; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+
+<body>
+<canvas id="cvs"></canvas>
+
+<div class="page">
+  <div class="card">
+
+    <!-- Live badge -->
+    <div class="badge-ai">
+      <span class="dot-pulse"></span>
+      LIVE AI
+    </div>
+
+    <!-- Logo -->
+    <div class="logo-wrap">
+      <div class="logo-box">
+        <span class="logo-brain">🧠</span>
+      </div>
+      <div class="logo-name">
+        SOJAG <span class="dot">✦</span> <span class="ai">AI</span>
+      </div>
+      <div class="logo-badge">De Jure Academy</div>
+    </div>
+
+    <!-- Welcome copy -->
+    <div class="welcome">
+      <h1>আপনাকে স্বাগতম! ✨</h1>
+      <p>
+        বাংলাদেশের সবচেয়ে শক্তিশালী<br/>
+        <strong>AI এজেন্ট</strong>-এ আপনার অ্যাকাউন্টে লগইন করুন
+      </p>
+    </div>
+
+    <!-- Form -->
+    <form id="loginForm" novalidate>
+
+      <!-- Username / Email -->
+      <div class="field" id="f-email">
+        <label for="email">ইউজারনেম / ইমেইল</label>
+        <div class="inp-wrap">
+          <i class="fa-solid fa-envelope inp-icon"></i>
+          <input
+            id="email"
+            name="email"
+            type="text"
+            class="inp"
+            placeholder="আপনার ইউজারনেম বা ইমেইল লিখুন"
+            autocomplete="username"
+          />
+        </div>
+        <div class="err-msg">⚠️ এই ঘরটি পূরণ করা আবশ্যক</div>
+      </div>
+
+      <!-- Password -->
+      <div class="field" id="f-pass">
+        <label for="password">পাসওয়ার্ড</label>
+        <div class="inp-wrap">
+          <i class="fa-solid fa-lock inp-icon"></i>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            class="inp pr"
+            placeholder="আপনার পাসওয়ার্ড লিখুন"
+            autocomplete="current-password"
+          />
+          <button type="button" class="pw-toggle" id="pwToggle" aria-label="পাসওয়ার্ড দেখুন">
+            <i class="fa-solid fa-eye" id="eyeIcon"></i>
+          </button>
+        </div>
+        <div class="err-msg">⚠️ পাসওয়ার্ড দিতে হবে</div>
+      </div>
+
+      <!-- Options row -->
+      <div class="row-opts">
+        <label class="chk-label">
+          <input type="checkbox" name="remember"/>
+          আমাকে মনে রাখুন
+        </label>
+        <a href="#" class="forgot">পাসওয়ার্ড ভুলে গেছেন?</a>
+      </div>
+
+      <!-- Submit -->
+      <button type="submit" class="btn-login" id="submitBtn">
+        লগইন করুন &nbsp;→
+      </button>
+
+    </form>
+
+    <div class="divider"><span>অথবা</span></div>
+
+    <div class="card-foot">
+      অ্যাকাউন্ট নেই? &nbsp;<a href="#">অ্যাডমিনের সাথে যোগাযোগ করুন</a>
+    </div>
+  </div>
+
+  <div class="bottom-bar">
+    © 2025 SOJAG AI &nbsp;·&nbsp; Powered by De Jure Academy &nbsp;·&nbsp; Bangladesh
+  </div>
+</div>
+
+<script>
+/* ─── Circuit board background ─── */
+(function () {
+  const cvs = document.getElementById('cvs');
+  const ctx = cvs.getContext('2d');
+  let W, H, nodes = [], lines = [];
+
+  const ORANGE = '#F5821E';
+  const CYAN   = '#00CAFF';
+
+  function resize() {
+    W = cvs.width  = window.innerWidth;
+    H = cvs.height = window.innerHeight;
+    buildGraph();
+  }
+
+  function buildGraph() {
+    nodes = [];
+    lines = [];
+    const cols = Math.ceil(W / 110) + 1;
+    const rows = Math.ceil(H / 110) + 1;
+
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r < rows; r++) {
+        if (Math.random() < .55) {
+          nodes.push({
+            x: c * 110 + (Math.random() - .5) * 55,
+            y: r * 110 + (Math.random() - .5) * 55,
+            r: Math.random() * 1.8 + 1,
+            ph: Math.random() * Math.PI * 2,
+            color: c < cols / 2 ? ORANGE : CYAN,
+            speed: .018 + Math.random() * .012,
+          });
+        }
+      }
+    }
+
+    /* connect nearby nodes with L-shaped segments */
+    nodes.forEach((a, i) => {
+      nodes.slice(i + 1).forEach(b => {
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d  = Math.hypot(dx, dy);
+        if (d < 165 && Math.random() < .45) {
+          /* elbow point */
+          const ex = Math.random() < .5 ? a.x : b.x;
+          const ey = Math.random() < .5 ? a.y : b.y;
+          lines.push({ a, b, ex, ey, color: a.color, alpha: (1 - d / 165) * .18 });
+        }
+      });
+    });
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    /* background gradient */
+    const bg = ctx.createRadialGradient(W*.5, H*.4, 0, W*.5, H*.5, Math.max(W,H)*.8);
+    bg.addColorStop(0, '#0E1F38');
+    bg.addColorStop(1, '#060C18');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    /* traces */
+    lines.forEach(l => {
+      ctx.beginPath();
+      ctx.moveTo(l.a.x, l.a.y);
+      ctx.lineTo(l.ex, l.ey === l.a.y ? l.a.y : l.ey);
+      ctx.lineTo(l.b.x, l.b.y);
+      ctx.strokeStyle = l.color === ORANGE
+        ? `rgba(245,130,30,${l.alpha})`
+        : `rgba(0,202,255,${l.alpha})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+
+    /* nodes */
+    nodes.forEach(n => {
+      n.ph += n.speed;
+      const glow = .45 + Math.sin(n.ph) * .2;
+
+      /* soft glow halo */
+      const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, 9);
+      const isO = n.color === ORANGE;
+      g.addColorStop(0, isO ? `rgba(245,130,30,${glow*.6})` : `rgba(0,202,255,${glow*.6})`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(n.x - 9, n.y - 9, 18, 18);
+
+      /* dot */
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r + Math.sin(n.ph) * .4, 0, Math.PI * 2);
+      ctx.fillStyle = n.color;
+      ctx.globalAlpha = glow + .15;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  draw();
+})();
+
+
+/* ─── Password toggle ─── */
+document.getElementById('pwToggle').addEventListener('click', function () {
+  const inp  = document.getElementById('password');
+  const icon = document.getElementById('eyeIcon');
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    icon.classList.replace('fa-eye', 'fa-eye-slash');
+  } else {
+    inp.type = 'password';
+    icon.classList.replace('fa-eye-slash', 'fa-eye');
+  }
+});
+
+
+/* ─── Form validation & submit ─── */
+document.getElementById('loginForm').addEventListener('submit', function (e) {
+  e.preventDefault();
+
+  const emailVal  = document.getElementById('email').value.trim();
+  const passVal   = document.getElementById('password').value.trim();
+  const fEmail    = document.getElementById('f-email');
+  const fPass     = document.getElementById('f-pass');
+  const btn       = document.getElementById('submitBtn');
+
+  /* reset */
+  fEmail.classList.remove('has-error');
+  fPass.classList.remove('has-error');
+
+  let ok = true;
+  if (!emailVal) { fEmail.classList.add('has-error'); ok = false; }
+  if (!passVal)  { fPass.classList.add('has-error');  ok = false; }
+
+  if (!ok) return;
+
+  /* simulate loading */
+  btn.disabled    = true;
+  btn.textContent = '⏳  লগইন হচ্ছে...';
+
+  setTimeout(() => {
+    btn.disabled    = false;
+    btn.textContent = 'লগইন করুন  →';
+  }, 2200);
+});
+</script>
+</body>
+</html>
