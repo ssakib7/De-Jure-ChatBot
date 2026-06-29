@@ -1,13 +1,13 @@
 // Lead capture sinks: append to a Google Sheet (via an Apps Script web app) and
-// notify the team's WhatsApp group (via CallMeBot). Both are optional and independent —
-// whatever is configured in .env runs; the rest is skipped.
+// notify the team's Telegram chat (via the Telegram Bot API). Both are optional and
+// independent — whatever is configured in .env runs; the rest is skipped.
 //
 // Env vars are read at call time (not import time) because dotenv.config() in server.js
 // runs after this module is imported.
 
 export function isLeadConfigured() {
   const e = process.env;
-  return Boolean(e.GOOGLE_SHEET_WEBAPP_URL || (e.CALLMEBOT_PHONE && e.CALLMEBOT_APIKEY));
+  return Boolean(e.GOOGLE_SHEET_WEBAPP_URL || (e.TELEGRAM_BOT_TOKEN && e.TELEGRAM_CHAT_ID));
 }
 
 // Append a row to the Google Sheet through the deployed Apps Script web app.
@@ -24,11 +24,11 @@ async function saveToSheet(lead) {
   }
 }
 
-// Post a notification to the WhatsApp group via CallMeBot.
-async function notifyWhatsApp(lead) {
-  const phone = process.env.CALLMEBOT_PHONE;
-  const apikey = process.env.CALLMEBOT_APIKEY;
-  if (!phone || !apikey) return;
+// Post a notification to the team's Telegram chat via the Telegram Bot API.
+async function notifyTelegram(lead) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
 
   const text =
     `🆕 New lead from Messenger\n` +
@@ -36,13 +36,13 @@ async function notifyWhatsApp(lead) {
     `Phone: ${lead.phone}\n` +
     `Time: ${lead.time}`;
 
-  const url =
-    `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(phone)}` +
-    `&text=${encodeURIComponent(text)}&apikey=${encodeURIComponent(apikey)}`;
-
-  const res = await fetch(url);
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
   if (!res.ok) {
-    throw new Error(`CallMeBot responded ${res.status}: ${await res.text()}`);
+    throw new Error(`Telegram responded ${res.status}: ${await res.text()}`);
   }
 }
 
@@ -50,8 +50,8 @@ async function notifyWhatsApp(lead) {
 // doesn't block the other, and neither throws to the caller (the customer is
 // thanked regardless; failures are logged for follow-up).
 export async function saveLead(lead) {
-  const results = await Promise.allSettled([saveToSheet(lead), notifyWhatsApp(lead)]);
-  const labels = ["Google Sheet", "WhatsApp"];
+  const results = await Promise.allSettled([saveToSheet(lead), notifyTelegram(lead)]);
+  const labels = ["Google Sheet", "Telegram"];
   results.forEach((r, i) => {
     if (r.status === "rejected") console.error(`Lead -> ${labels[i]} failed:`, r.reason);
   });

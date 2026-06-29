@@ -16,3 +16,7 @@ services:
     volumes:
       - ./knowledge_base.json:/app/knowledge_base.json
       - ./knowledge_base.md:/app/knowledge_base.md
+      # Persist conversation memory + known customers (data/bot.db.json) across redeploys.
+      # The container's `node` user (uid 1000) must be able to write here, so create the dir
+      # and make it writable first:  mkdir -p data && chmod 777 data
+      - ./data:/app/data
