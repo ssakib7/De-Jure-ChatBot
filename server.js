@@ -42,7 +42,7 @@ for (const [name, value] of Object.entries({
 }
 
 const GRAPH_API = "https://graph.facebook.com/v21.0";
-const MODEL = "gemini-3.5-flash"; // fast + cheap, ideal for short FAQ replies + tool calls
+const MODEL = "gemini-3.1-flash-lite"; // fast + cheap, ideal for short FAQ replies + tool calls
 
 const LEADS_ON = isLeadConfigured();
 
@@ -430,13 +430,17 @@ async function captureLead(senderId, session, { name, phone }) {
   session.customerName = name;
   store.markDirty();
 
+  // Deep-link into the Business Suite inbox conversation (null if FB_BUSINESS_ID/FB_PAGE_ID unset).
+  const conversationUrl = inboxUrl(senderId);
   await saveLead({
     name,
     phone,
     senderId,
     time: new Date().toISOString(),
-    source: "messenger",
-    conversationUrl: inboxUrl(senderId), // null when FB_BUSINESS_ID/FB_PAGE_ID unset
+    // Source = the inbox conversation link, so the lead team can click straight to the chat from
+    // the sheet. Falls back to "messenger" when the page/business ids aren't configured.
+    source: conversationUrl || "messenger",
+    conversationUrl,
   });
 }
 
