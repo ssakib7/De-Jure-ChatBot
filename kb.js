@@ -1,5 +1,5 @@
 // Knowledge base data layer.
-// `knowledge_base.json` is the canonical source of truth (edited via the /admin panel).
+// `knowledge_base.json` is the canonical source of truth (edited via the admin panel).
 // The markdown file and the Gemini system prompt are GENERATED from it.
 import fs from "node:fs";
 import path from "node:path";
@@ -8,10 +8,18 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JSON_PATH = path.join(__dirname, "knowledge_base.json");
 const MD_PATH = path.join(__dirname, "knowledge_base.md");
+// The system prompt lives in its own file, separate from the knowledge base.
+const PROMPT_PATH = path.join(__dirname, "system_prompt.txt");
+// Admin-defined prompt scenarios (examples / "when X do Y" guidance), appended to the prompt.
+const PROMPT_SECTIONS_PATH = path.join(__dirname, "prompt_sections.json");
+// Admin-editable answering rules (AI do's and don'ts), appended to the prompt as instructions.
+const ANSWERING_RULES_PATH = path.join(__dirname, "answering_rules.txt");
 
-// The fixed instructions the AI always gets, with the generated KB appended.
-// Keep this in sync with the writing/answering style we want from the bot.
-const PROMPT_HEADER = `You are a real, friendly member of the De Jure Academy support team replying to \
+// The bot's core instructions (persona + writing/answering style). This is the DEFAULT used
+// whenever the admin hasn't set a custom system prompt in the admin panel. The knowledge base
+// is assembled onto this separately (see buildSystemPrompt), so editing one never touches the
+// other. Keep this in sync with the writing/answering style we want from the bot.
+export const DEFAULT_SYSTEM_PROMPT = `You are a real, friendly member of the De Jure Academy support team replying to \
 customers in the Facebook Page inbox. De Jure Academy is a Bangladesh law-education platform (BJS Judicial \
 Service and Bar Council exam preparation). Chat the way a warm, helpful human page admin would on Messenger \
 — never like a brochure or a bot.
@@ -36,14 +44,83 @@ phone numbers, or anything not written there.
 - Only offer to connect the customer to a human or share contact details when you genuinely CANNOT answer from \
 the knowledge base — e.g. exact payment steps, a personal account/payment status, refunds, or a schedule that \
 isn't listed. If you have already fully answered the question, do NOT tack on a "we'll connect you to a \
-representative" line — just answer warmly and stop.
+representative" line — just answer warmly and stop.`;
 
-=== KNOWLEDGE BASE ===
-`;
+// Structural marker placed between the instructions above and the generated knowledge base.
+const KB_SEPARATOR = "\n\n=== KNOWLEDGE BASE ===\n";
 
 // Read and parse the canonical JSON data.
 export function loadKb() {
   return JSON.parse(fs.readFileSync(JSON_PATH, "utf8"));
+}
+
+// Read the admin-edited system prompt from its own file, or the built-in default when the
+// file is missing or blank. Kept separate from the knowledge base by design.
+export function loadSystemPrompt() {
+  try {
+    const text = fs.readFileSync(PROMPT_PATH, "utf8");
+    return text.trim() ? text : DEFAULT_SYSTEM_PROMPT;
+  } catch {
+    return DEFAULT_SYSTEM_PROMPT;
+  }
+}
+
+// Persist the system prompt to its own file. Stored raw; a blank value reverts to the
+// default at read time (see loadSystemPrompt).
+export function saveSystemPrompt(text) {
+  fs.writeFileSync(PROMPT_PATH, String(text ?? ""), "utf8");
+}
+
+// Admin-defined prompt scenarios: an array of { title, body } appended to the system prompt
+// (examples, "when X do Y" guidance). Stored alongside the prompt, separate from the KB.
+export function loadPromptSections() {
+  try {
+    const arr = JSON.parse(fs.readFileSync(PROMPT_SECTIONS_PATH, "utf8"));
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+export function savePromptSections(sections) {
+  const clean = (Array.isArray(sections) ? sections : [])
+    .map((s) => ({ title: (s?.title ?? "").trim(), body: s?.body ?? "" }))
+    .filter((s) => s.title || s.body.trim());
+  fs.writeFileSync(PROMPT_SECTIONS_PATH, JSON.stringify(clean, null, 2) + "\n", "utf8");
+}
+
+// Default answering rules (AI do's and don'ts). Edit the copy in the panel to change them;
+// a blank value restores this default.
+export const DEFAULT_ANSWERING_RULES = `- Answer **only** using facts in the knowledge base below. If asked something not covered there \
+(exact batch schedules beyond those listed, refunds, a customer's individual account/payment status), \
+say you'll connect them to a human and share the phone/Facebook page — do not guess.
+- **Never invent** prices, dates, guarantees, or course names.
+- **Always reply in Bengali (Bangla)**, regardless of the language the customer writes in.
+- Keep replies **short, warm, and helpful**. Use ৳ for prices.
+- If a price has both a regular and offer price, mention the current offer price first.`;
+
+// Read the answering rules. If the file exists, it wins (a blank file means the admin cleared
+// it → use the default). If the file doesn't exist yet, fall back once to the value still in
+// knowledge_base.json (migration), else the built-in default.
+export function loadAnsweringRules() {
+  try {
+    const text = fs.readFileSync(ANSWERING_RULES_PATH, "utf8");
+    return text.trim() ? text : DEFAULT_ANSWERING_RULES;
+  } catch {
+    /* no file yet — migrate from the KB json below */
+  }
+  try {
+    const kb = JSON.parse(fs.readFileSync(JSON_PATH, "utf8"));
+    if ((kb.answeringRules ?? "").trim()) return kb.answeringRules;
+  } catch {
+    /* fall through */
+  }
+  return DEFAULT_ANSWERING_RULES;
+}
+
+// Persist answering rules to their own file. A blank value reverts to the default at read time.
+export function saveAnsweringRules(text) {
+  fs.writeFileSync(ANSWERING_RULES_PATH, String(text ?? ""), "utf8");
 }
 
 // Group digits with thousands commas: "22000" -> "22,000". Non-numeric input is returned as-is.
@@ -68,7 +145,7 @@ export function renderMarkdown(kb) {
   lines.push("# De Jure Academy — Knowledge Base");
   lines.push("");
   lines.push("> Source of truth for the Facebook Messenger AI auto-reply bot.");
-  lines.push("> Generated from knowledge_base.json via the /admin panel. Edit there, not here.");
+  lines.push("> Generated from knowledge_base.json via the admin panel. Edit there, not here.");
   lines.push("");
 
   // `about` holds the intro plus the Core values / Mission / Vision subsections as markdown.
@@ -116,16 +193,44 @@ export function renderMarkdown(kb) {
   lines.push("## How to enroll / pay");
   lines.push(kb.enroll?.trim() ?? "");
   lines.push("");
-  lines.push("## Answering rules (instructions to the AI)");
-  lines.push(kb.answeringRules?.trim() ?? "");
-  lines.push("");
+
+  // Admin-defined free-form sections (added via the admin panel). Each is plain markdown
+  // appended to the knowledge base as written, so the bot treats it like any other fact.
+  for (const section of kb.customSections ?? []) {
+    const title = (section?.title ?? "").trim();
+    const body = (section?.body ?? "").trim();
+    if (!title && !body) continue;
+    lines.push(`## ${title || "Additional information"}`);
+    lines.push(body);
+    lines.push("");
+  }
 
   return lines.join("\n");
 }
 
-// The full system instruction sent to Gemini.
-export function buildSystemPrompt(kb) {
-  return PROMPT_HEADER + renderMarkdown(kb);
+// Render admin-defined prompt scenarios into a block appended to the system prompt, so the
+// AI follows them (example conversations, "when X do Y" rules). Empty when none are set.
+function renderPromptSections(sections) {
+  const blocks = (sections ?? [])
+    .map((s) => {
+      const title = (s?.title ?? "").trim();
+      const body = (s?.body ?? "").trim();
+      if (!title && !body) return "";
+      return `\n\n### ${title || "Scenario"}\n${body}`;
+    })
+    .filter(Boolean)
+    .join("");
+  return blocks ? `\n\n=== EXAMPLES & SCENARIOS ===${blocks}` : "";
+}
+
+// The full system instruction sent to Gemini: the system prompt (or default), then the answering
+// rules, then any prompt scenarios, then the generated knowledge base. Prompt, rules, and
+// scenarios are passed in explicitly — they live in their own files, separate from the KB.
+export function buildSystemPrompt(kb, systemPrompt, promptSections = [], answeringRules = "") {
+  const header = (systemPrompt ?? "").trim() || DEFAULT_SYSTEM_PROMPT;
+  const rules = (answeringRules ?? "").trim();
+  const rulesBlock = rules ? `\n\n=== ANSWERING RULES ===\n${rules}` : "";
+  return header + rulesBlock + renderPromptSections(promptSections) + KB_SEPARATOR + renderMarkdown(kb);
 }
 
 // Persist the structured data, and regenerate the human-readable markdown alongside it.

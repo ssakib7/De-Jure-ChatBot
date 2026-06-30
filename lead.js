@@ -34,7 +34,8 @@ async function notifyTelegram(lead) {
     `🆕 New lead from Messenger\n` +
     `Name: ${lead.name}\n` +
     `Phone: ${lead.phone}\n` +
-    `Time: ${lead.time}`;
+    `Time: ${lead.time}` +
+    (lead.conversationUrl ? `\nOpen chat: ${lead.conversationUrl}` : "");
 
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",

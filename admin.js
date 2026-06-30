@@ -1,9 +1,26 @@
 // Admin web panel for editing the knowledge base.
-// Mounted at /admin by server.js. Auth is a signed, httpOnly session cookie (no DB, no extra deps).
+// Mounted at the root ("/") by server.js. Auth is a signed, httpOnly session cookie (no DB, no extra deps).
 import crypto from "node:crypto";
 import express from "express";
 
-import { loadKb, saveKb } from "./kb.js";
+import {
+  loadKb,
+  saveKb,
+  DEFAULT_SYSTEM_PROMPT,
+  loadSystemPrompt,
+  saveSystemPrompt,
+  loadPromptSections,
+  savePromptSections,
+  DEFAULT_ANSWERING_RULES,
+  loadAnsweringRules,
+  saveAnsweringRules,
+} from "./kb.js";
+import {
+  DEFAULT_LEAD_INSTRUCTION,
+  DEFAULT_ASK_AFTER_TURNS,
+  loadLeadCapture,
+  saveLeadCapture,
+} from "./lead_capture.js";
 
 const COOKIE_NAME = "dj_admin";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -113,6 +130,11 @@ const PAGE_STYLE = `
   .nav a { display: block; padding: 8px 11px; border-radius: 8px; color: var(--muted);
     text-decoration: none; font-size: 14px; font-weight: 500; transition: background .15s, color .15s; }
   .nav a:hover { background: rgba(0,202,255,.08); color: var(--ink); }
+  .nav a.nav-active { background: rgba(0,202,255,.12); color: var(--ink); font-weight: 600; }
+  .nav-label { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted-2); padding: 14px 11px 5px; }
+  .nav a.nav-sub { padding: 5px 11px 5px 22px; font-size: 13px; color: var(--muted-2); }
+  .nav a.nav-sub:hover { color: var(--ink); }
   .nav-foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line); }
   .nav-foot form { margin: 0; }
   .nav-foot button { width: 100%; }
@@ -189,6 +211,26 @@ const PAGE_STYLE = `
 
   /* Add-course / add-column actions under each table */
   .table-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  /* Custom (admin-added) free-form sections */
+  .custom-head { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; }
+  .custom-title { font-family: var(--serif); font-size: 18px; font-weight: 700; color: var(--ink);
+    background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 9px; }
+  .custom-title::placeholder { color: var(--muted-2); font-weight: 600; }
+  .custom-title:hover { border-color: var(--line-strong); }
+  .custom-title:focus { outline: none; background: rgba(0,202,255,.06); border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0,202,255,.15); }
+  .custom-head .icon-btn { flex: none; }
+  .custom-empty { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+  #sec-custom > .add-row { margin-top: 0; }
+
+  /* System prompt — long instructions, so a tall editor with a monospace feel */
+  textarea.prompt-input { min-height: 340px; font-size: 13.5px; line-height: 1.6; }
+
+  /* Examples & scenarios group (admin-added prompt sections) */
+  .group-head { font-family: var(--serif); font-size: 18px; font-weight: 700; margin: 26px 0 2px; }
+  .group-sub { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 72ch; }
+  #sec-scenarios > .add-row { margin-top: 0; }
 
   /* Custom (admin-added) text columns */
   .extra-col { min-width: 130px; }
@@ -452,7 +494,7 @@ function loginPage({ error } = {}) {
 
     ${error ? `<div class="server-err"><i class="fa-solid fa-circle-exclamation"></i><span>${esc(error)}</span></div>` : ""}
 
-    <form id="loginForm" method="post" action="/admin/login" novalidate>
+    <form id="loginForm" method="post" action="/login" novalidate>
       <div class="field" id="f-user">
         <label for="username">ইউজারনেম / ইমেইল</label>
         <div class="inp-wrap">
@@ -587,7 +629,7 @@ document.getElementById('loginForm').addEventListener('submit', function (e) {
   var btn = document.getElementById('submitBtn');
   btn.disabled = true;
   btn.textContent = '⏳  লগইন হচ্ছে...';
-  /* no preventDefault — the browser submits the form to /admin/login */
+  /* no preventDefault — the browser submits the form to /login */
 });
 </script>
 </body></html>`;
@@ -654,6 +696,167 @@ function categoryTable(ci, cat) {
   </section>`;
 }
 
+// One admin-defined free-form section: an editable title + a markdown body.
+function customSectionCard(i, section = {}) {
+  const path = `customSections[${i}]`;
+  return `<section class="card custom-section" data-section="${i}">
+  <div class="custom-head">
+    <input type="text" class="custom-title" name="${path}[title]" value="${esc(section.title)}"
+      placeholder="Section title (e.g. Lead messages, FAQ, Promotions)">
+    <button type="button" class="icon-btn" title="Remove section" onclick="this.closest('.custom-section').remove()">✕</button>
+  </div>
+  <p class="hint">Markdown. The bot uses this as part of its knowledge base, exactly as written.</p>
+  <textarea name="${path}[body]" placeholder="Write this section's content here…">${esc(section.body)}</textarea>
+</section>`;
+}
+
+// One admin-defined prompt scenario: an editable title + a markdown body, appended to the
+// system prompt so the AI follows it (example conversations, "when X do Y" guidance).
+function scenarioCard(i, section = {}) {
+  const path = `promptSections[${i}]`;
+  return `<section class="card scenario-section" data-section="${i}">
+  <div class="custom-head">
+    <input type="text" class="custom-title" name="${path}[title]" value="${esc(section.title)}"
+      placeholder="Scenario title (e.g. Example lead, Refund question)">
+    <button type="button" class="icon-btn" title="Remove scenario" onclick="this.closest('.scenario-section').remove()">✕</button>
+  </div>
+  <p class="hint">Markdown, added to the system prompt. Great for an example conversation or a “when a customer does X, respond with Y” rule.</p>
+  <textarea name="${path}[body]" placeholder="e.g. When a customer wants to enroll, warmly ask for their name and phone number, then…">${esc(section.body)}</textarea>
+</section>`;
+}
+
+// Shared document head (fonts + styles). `title` shows in the browser tab.
+function pageHead(title) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)} — De Jure Academy</title>
+<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>${PAGE_STYLE}</style></head>
+<body>`;
+}
+
+// Shared sidebar shown on both admin pages. `active` is "kb" or "prompt". Knowledge-base
+// links are in-page anchors on the KB page and full links to the root ("/") from elsewhere, so
+// the nav works the same from either page.
+function renderSidebar(active, csrf) {
+  const kbLink = (anchor, label) =>
+    `<a href="${active === "kb" ? "#" + anchor : "/#" + anchor}">${label}</a>`;
+  return `<aside class="sidebar">
+  <div class="brand">
+    <div class="mark">🧠</div>
+    <div>
+      <div class="brand-name">SOJAG <span class="ai">AI</span></div>
+      <div class="brand-sub">De Jure Academy</div>
+    </div>
+  </div>
+  <nav class="nav">
+    <a href="/system-prompt"${active === "prompt" ? ' class="nav-active"' : ""}>Bot behaviour</a>${
+    active === "prompt"
+      ? `\n    <a class="nav-sub" href="#sec-prompt">System prompt</a>\n    <a class="nav-sub" href="#sec-rules">Answering rules</a>\n    <a class="nav-sub" href="#sec-scenarios">Examples &amp; scenarios</a>\n    <a class="nav-sub" href="#sec-lead">Lead capture</a>`
+      : ""
+  }
+    <div class="nav-label">Knowledge base</div>
+    ${kbLink("sec-about", "About")}
+    ${kbLink("sec-contact", "Contact")}
+    ${kbLink("sec-courses", "Courses")}
+    ${kbLink("sec-books", "Books &amp; products")}
+    ${kbLink("sec-enroll", "Enrollment")}
+    ${kbLink("sec-custom", "Custom sections")}
+  </nav>
+  <div class="nav-foot">
+    <form method="post" action="/logout">
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      <button type="submit" class="btn-ghost">Log out</button>
+    </form>
+  </div>
+</aside>`;
+}
+
+// The "Bot behaviour" page: the system prompt + the examples & scenarios that shape how the bot
+// replies, on one page with a single Save. Kept separate from the knowledge-base facts. The
+// prompt lives in system_prompt.txt; scenarios in prompt_sections.json.
+function botVoicePage(promptText, promptSections, leadCapture, answeringRules, { csrf, saved } = {}) {
+  const sections = promptSections ?? [];
+  const scenarioCards = sections.map((s, i) => scenarioCard(i, s)).join("\n");
+  const lead = leadCapture ?? {};
+
+  return `${pageHead("Bot behaviour")}
+<div class="layout">
+${renderSidebar("prompt", csrf)}
+<main class="main">
+<h1 class="page-title">Bot behaviour</h1>
+<p class="lede">How the bot replies: its <strong>system prompt</strong> (core instructions for the AI) and <strong>examples &amp; scenarios</strong> (guidance for specific situations — like collecting a lead). The AI writes every reply from these; the <a href="/">knowledge base</a> — the facts — lives separately. Changes take effect for new replies as soon as you save — no restart needed.</p>
+${saved ? `<div class="flash">Saved. The bot is now using the updated settings.</div>` : ""}
+
+<form method="post" action="/system-prompt">
+<input type="hidden" name="_csrf" value="${esc(csrf)}">
+
+<section class="card" id="sec-prompt">
+  <h2>System prompt</h2>
+  <p class="hint">The core instructions sent to the AI on every message. The knowledge base is appended automatically, so don't paste facts here. Leave blank to restore the built-in default (shown as the placeholder).</p>
+  <textarea id="systemPrompt" name="systemPrompt" class="prompt-input" placeholder="${esc(DEFAULT_SYSTEM_PROMPT)}">${esc(promptText)}</textarea>
+</section>
+
+<section class="card" id="sec-rules">
+  <h2>Answering rules</h2>
+  <p class="hint">Do's and don'ts the bot always follows (e.g. never invent prices, always reply in Bengali). Added to the prompt as instructions. Markdown. Leave blank to restore the default (shown as placeholder).</p>
+  <textarea id="answeringRules" name="answeringRules" placeholder="${esc(DEFAULT_ANSWERING_RULES)}">${esc(answeringRules)}</textarea>
+</section>
+
+<div id="sec-scenarios">
+  <h2 class="group-head">Examples &amp; scenarios</h2>
+  <p class="group-sub">Free-form guidance appended to the system prompt. Use it for an example lead conversation, or a “when a customer does X, respond with Y” rule — the bot follows these instead of relying on fixed canned replies.</p>
+  <div class="scenario-list" data-next="${sections.length}">
+  ${scenarioCards}
+  </div>
+  <p class="custom-empty"${sections.length ? ' style="display:none"' : ""}>No scenarios yet. Add an example lead, a refund-question playbook, or any “when X, do Y” rule — the bot will follow it.</p>
+  <button type="button" class="add-row" onclick="addScenario()">+ Add scenario</button>
+</div>
+
+<section class="card" id="sec-lead">
+  <h2>Lead capture</h2>
+  <p class="hint">How and when the bot collects a customer's contact details. It asks them to send their name + phone, then a <code>save_lead</code> tool saves it to your Sheet/Telegram (the phone is validated in code). Only used when lead capture is configured. Leave the instruction blank to restore the default (shown as placeholder).</p>
+  <label for="leadInstruction">Lead-capture instruction (added to the prompt)</label>
+  <textarea id="leadInstruction" name="leadInstruction" placeholder="${esc(DEFAULT_LEAD_INSTRUCTION)}">${esc(lead.instruction)}</textarea>
+  <label for="leadAskAfterTurns">Proactively ask after this many messages</label>
+  <input type="number" id="leadAskAfterTurns" name="leadAskAfterTurns" min="1" max="20" value="${esc(lead.askAfterTurns)}" style="max-width:130px">
+  <p class="hint" style="margin-top:6px">The bot also asks sooner if it senses clear intent — this is the backstop. Default ${DEFAULT_ASK_AFTER_TURNS}.</p>
+</section>
+
+<div class="savebar"><div class="savebar-inner">
+  <span class="note">Changes apply instantly after saving.</span>
+  <span class="spacer"></span>
+  <button type="submit" class="btn-primary">Save changes</button>
+</div></div>
+</form>
+</main>
+</div>
+
+<script>
+function addScenario() {
+  var list = document.querySelector('#sec-scenarios .scenario-list');
+  var i = parseInt(list.getAttribute('data-next'), 10);
+  list.setAttribute('data-next', i + 1);
+  var path = 'promptSections[' + i + ']';
+  var sec = document.createElement('section');
+  sec.className = 'card scenario-section';
+  sec.setAttribute('data-section', i);
+  sec.innerHTML =
+    '<div class="custom-head">' +
+      '<input type="text" class="custom-title" name="' + path + '[title]" placeholder="Scenario title (e.g. Example lead, Refund question)">' +
+      '<button type="button" class="icon-btn" title="Remove scenario" onclick="this.closest(\\'.scenario-section\\').remove()">✕</button>' +
+    '</div>' +
+    '<p class="hint">Markdown, added to the system prompt so the AI follows it.</p>' +
+    '<textarea name="' + path + '[body]" placeholder="e.g. When a customer wants to enroll, ask for their name and phone…"></textarea>';
+  list.appendChild(sec);
+  var empty = document.querySelector('#sec-scenarios .custom-empty');
+  if (empty) empty.style.display = 'none';
+  sec.querySelector('input').focus();
+}
+</script>
+</body></html>`;
+}
+
 function editorPage(kb, { csrf, saved } = {}) {
   const ta = (label, name, value, hint) =>
     `<label for="${name}">${esc(label)}</label>` +
@@ -665,44 +868,19 @@ function editorPage(kb, { csrf, saved } = {}) {
 
   const c = kb.contact ?? {};
   const categories = (kb.courseCategories ?? []).map((cat, ci) => categoryTable(ci, cat)).join("\n");
+  const customSections = kb.customSections ?? [];
+  const customCards = customSections.map((s, i) => customSectionCard(i, s)).join("\n");
 
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Edit Knowledge Base — De Jure Academy</title>
-<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<style>${PAGE_STYLE}</style></head>
-<body>
+  return `${pageHead("Knowledge Base")}
 <div class="layout">
-<aside class="sidebar">
-  <div class="brand">
-    <div class="mark">🧠</div>
-    <div>
-      <div class="brand-name">SOJAG <span class="ai">AI</span></div>
-      <div class="brand-sub">De Jure Academy</div>
-    </div>
-  </div>
-  <nav class="nav">
-    <a href="#sec-about">About</a>
-    <a href="#sec-contact">Contact</a>
-    <a href="#sec-courses">Courses</a>
-    <a href="#sec-books">Books &amp; products</a>
-    <a href="#sec-enroll">Enrollment</a>
-    <a href="#sec-rules">AI answering rules</a>
-  </nav>
-  <div class="nav-foot">
-    <form method="post" action="/admin/logout">
-      <input type="hidden" name="_csrf" value="${esc(csrf)}">
-      <button type="submit" class="btn-ghost">Log out</button>
-    </form>
-  </div>
-</aside>
+${renderSidebar("kb", csrf)}
 
 <main class="main">
 <h1 class="page-title">Knowledge Base</h1>
-<p class="lede">This is the bot's source of truth. Changes take effect for new replies as soon as you save — no restart needed.</p>
+<p class="lede">The facts the bot answers from. Its core instructions live separately under <a href="/system-prompt">System prompt</a>. Changes take effect for new replies as soon as you save — no restart needed.</p>
 ${saved ? `<div class="flash">Saved. The bot is now using the updated knowledge base.</div>` : ""}
 
-<form method="post" action="/admin/save">
+<form method="post" action="/save">
 <input type="hidden" name="_csrf" value="${esc(csrf)}">
 
 <section class="card" id="sec-about">
@@ -736,10 +914,16 @@ ${categories}
   ${ta("Enrollment instructions", "enroll", kb.enroll, "Markdown.")}
 </section>
 
-<section class="card" id="sec-rules">
-  <h2>AI answering rules</h2>
-  ${ta("Answering rules", "answeringRules", kb.answeringRules, "Markdown — guidance the bot always follows. Edit with care.")}
-</section>
+<div id="sec-custom">
+  <div class="custom-list" data-next="${customSections.length}">
+  ${customCards}
+  </div>
+  <p class="custom-empty"${customSections.length ? ' style="display:none"' : ""}>
+    No custom sections yet. Add one for anything not covered above — lead messages, FAQs, promotions, policies — and the bot will use it.
+  </p>
+  <button type="button" class="add-row" onclick="addSection()">+ Add section</button>
+</div>
+
 
 <div class="savebar"><div class="savebar-inner">
   <span class="note">Changes apply instantly after saving.</span>
@@ -820,6 +1004,26 @@ function removeColumn(ci, k) {
   if (th) th.remove();
   table.querySelectorAll('tbody td[data-col="' + k + '"]').forEach(function (td) { td.remove(); });
 }
+function addSection() {
+  var list = document.querySelector('#sec-custom .custom-list');
+  var i = parseInt(list.getAttribute('data-next'), 10);
+  list.setAttribute('data-next', i + 1);
+  var path = 'customSections[' + i + ']';
+  var sec = document.createElement('section');
+  sec.className = 'card custom-section';
+  sec.setAttribute('data-section', i);
+  sec.innerHTML =
+    '<div class="custom-head">' +
+      '<input type="text" class="custom-title" name="' + path + '[title]" placeholder="Section title (e.g. Lead messages, FAQ, Promotions)">' +
+      '<button type="button" class="icon-btn" title="Remove section" onclick="this.closest(\\'.custom-section\\').remove()">✕</button>' +
+    '</div>' +
+    '<p class="hint">Markdown. The bot uses this as part of its knowledge base, exactly as written.</p>' +
+    '<textarea name="' + path + '[body]" placeholder="Write this section\\'s content here…"></textarea>';
+  list.appendChild(sec);
+  var empty = document.querySelector('#sec-custom .custom-empty');
+  if (empty) empty.style.display = 'none';
+  sec.querySelector('input').focus();
+}
 </script>
 </body></html>`;
 }
@@ -890,6 +1094,12 @@ function formToKb(body) {
     };
   });
 
+  // Admin-added free-form sections: keep title (trimmed) + raw markdown body.
+  // Drop any the admin added but left entirely blank.
+  const customSections = toArray(body.customSections)
+    .map((s) => ({ title: (s?.title ?? "").trim(), body: s?.body ?? "" }))
+    .filter((s) => s.title || s.body.trim());
+
   return {
     about: body.about ?? "",
     contact: {
@@ -901,7 +1111,7 @@ function formToKb(body) {
     courseCategories: categories,
     books: body.books ?? "",
     enroll: body.enroll ?? "",
-    answeringRules: body.answeringRules ?? "",
+    customSections,
   };
 }
 
@@ -913,7 +1123,7 @@ export function createAdminRouter({ adminUsername, adminPassword, sessionSecret,
   const requireAuth = (req, res, next) => {
     const cookies = parseCookies(req.headers.cookie);
     const session = verifySession(sessionSecret, cookies[COOKIE_NAME]);
-    if (!session) return res.redirect("/admin/login");
+    if (!session) return res.redirect("/login");
     req.session = session;
     req.sessionValue = cookies[COOKIE_NAME];
     next();
@@ -929,7 +1139,7 @@ export function createAdminRouter({ adminUsername, adminPassword, sessionSecret,
   router.get("/login", (req, res) => {
     // Already logged in? Skip the form.
     const cookies = parseCookies(req.headers.cookie);
-    if (verifySession(sessionSecret, cookies[COOKIE_NAME])) return res.redirect("/admin");
+    if (verifySession(sessionSecret, cookies[COOKIE_NAME])) return res.redirect("/");
     res.type("html").send(loginPage());
   });
 
@@ -945,14 +1155,14 @@ export function createAdminRouter({ adminUsername, adminPassword, sessionSecret,
       sameSite: "strict",
       secure: process.env.NODE_ENV === "production",
       maxAge: SESSION_TTL_MS,
-      path: "/admin",
+      path: "/",
     });
-    res.redirect("/admin");
+    res.redirect("/");
   });
 
   router.post("/logout", requireAuth, requireCsrf, (req, res) => {
-    res.clearCookie(COOKIE_NAME, { path: "/admin" });
-    res.redirect("/admin/login");
+    res.clearCookie(COOKIE_NAME, { path: "/" });
+    res.redirect("/login");
   });
 
   router.get("/", requireAuth, (req, res) => {
@@ -964,7 +1174,31 @@ export function createAdminRouter({ adminUsername, adminPassword, sessionSecret,
     const kb = formToKb(req.body ?? {});
     saveKb(kb);
     if (typeof onSaved === "function") onSaved();
-    res.redirect("/admin?saved=1");
+    res.redirect("/?saved=1");
+  });
+
+  // The bot's voice — system prompt + scripted messages — on its own page, each in its own
+  // file, separate from the knowledge base.
+  router.get("/system-prompt", requireAuth, (req, res) => {
+    const csrf = csrfToken(sessionSecret, req.sessionValue);
+    res.type("html").send(
+      botVoicePage(loadSystemPrompt(), loadPromptSections(), loadLeadCapture(), loadAnsweringRules(), {
+        csrf,
+        saved: req.query.saved === "1",
+      })
+    );
+  });
+
+  router.post("/system-prompt", requireAuth, requireCsrf, (req, res) => {
+    saveSystemPrompt(req.body?.systemPrompt ?? "");
+    savePromptSections(toArray(req.body?.promptSections));
+    saveLeadCapture({
+      instruction: req.body?.leadInstruction ?? "",
+      askAfterTurns: req.body?.leadAskAfterTurns,
+    });
+    saveAnsweringRules(req.body?.answeringRules ?? "");
+    if (typeof onSaved === "function") onSaved();
+    res.redirect("/system-prompt?saved=1");
   });
 
   return router;
