@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import express from "express";
 import dotenv from "dotenv";
@@ -308,6 +311,24 @@ app.use(
 
 // Parse form posts from the admin panel (the webhook stays JSON above).
 app.use(express.urlencoded({ extended: true }));
+
+// Public privacy policy (required for Meta App Review / going Live). Served from the bot's
+// own domain so it always has a working HTTPS URL. Registered BEFORE the admin router so it
+// stays public — no login. Loaded once from disk; falls back to a 404 if the file is missing.
+const PRIVACY_HTML = (() => {
+  try {
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    return fs.readFileSync(path.join(dir, "privacy.html"), "utf8");
+  } catch (err) {
+    console.warn("privacy.html not found — /privacy will 404.", err.message);
+    return null;
+  }
+})();
+
+app.get("/privacy", (_req, res) => {
+  if (!PRIVACY_HTML) return res.sendStatus(404);
+  res.type("html").send(PRIVACY_HTML);
+});
 
 // Admin web panel for editing the knowledge base (login-protected).
 // Mounted at the root so it loads at http://localhost:PORT directly.
