@@ -5,15 +5,24 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { DATA_DIR } from "./store.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JSON_PATH = path.join(__dirname, "knowledge_base.json");
 const MD_PATH = path.join(__dirname, "knowledge_base.md");
+// The admin-editable prompt files live in the writable, persisted data dir (a Docker volume) —
+// not in the image's /app dir, which the container's non-root user can't write to.
 // The system prompt lives in its own file, separate from the knowledge base.
-const PROMPT_PATH = path.join(__dirname, "system_prompt.txt");
+const PROMPT_PATH = path.join(DATA_DIR, "system_prompt.txt");
 // Admin-defined prompt scenarios (examples / "when X do Y" guidance), appended to the prompt.
-const PROMPT_SECTIONS_PATH = path.join(__dirname, "prompt_sections.json");
+const PROMPT_SECTIONS_PATH = path.join(DATA_DIR, "prompt_sections.json");
 // Admin-editable answering rules (AI do's and don'ts), appended to the prompt as instructions.
-const ANSWERING_RULES_PATH = path.join(__dirname, "answering_rules.txt");
+const ANSWERING_RULES_PATH = path.join(DATA_DIR, "answering_rules.txt");
+
+// Make sure the data dir exists before writing a config file into it.
+function ensureDataDir() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
 
 // The bot's core instructions (persona + writing/answering style). This is the DEFAULT used
 // whenever the admin hasn't set a custom system prompt in the admin panel. The knowledge base
@@ -68,6 +77,7 @@ export function loadSystemPrompt() {
 // Persist the system prompt to its own file. Stored raw; a blank value reverts to the
 // default at read time (see loadSystemPrompt).
 export function saveSystemPrompt(text) {
+  ensureDataDir();
   fs.writeFileSync(PROMPT_PATH, String(text ?? ""), "utf8");
 }
 
@@ -86,6 +96,7 @@ export function savePromptSections(sections) {
   const clean = (Array.isArray(sections) ? sections : [])
     .map((s) => ({ title: (s?.title ?? "").trim(), body: s?.body ?? "" }))
     .filter((s) => s.title || s.body.trim());
+  ensureDataDir();
   fs.writeFileSync(PROMPT_SECTIONS_PATH, JSON.stringify(clean, null, 2) + "\n", "utf8");
 }
 
@@ -120,6 +131,7 @@ export function loadAnsweringRules() {
 
 // Persist answering rules to their own file. A blank value reverts to the default at read time.
 export function saveAnsweringRules(text) {
+  ensureDataDir();
   fs.writeFileSync(ANSWERING_RULES_PATH, String(text ?? ""), "utf8");
 }
 

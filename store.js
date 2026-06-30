@@ -21,7 +21,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+// Writable, persisted data directory (mounted as a volume in Docker). Holds bot.db.json plus
+// the admin-editable config files (system prompt, scenarios, answering rules, lead capture),
+// which the container's non-root user can't write into the image's /app dir.
+export const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const DB_PATH = path.join(DATA_DIR, "bot.db.json");
 const TMP_PATH = DB_PATH + ".tmp";
 

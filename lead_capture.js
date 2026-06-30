@@ -6,10 +6,11 @@
 // model-facing guidance and the trigger timing.
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const LEAD_PATH = path.join(__dirname, "lead_capture.json");
+import { DATA_DIR } from "./store.js";
+
+// Stored in the writable, persisted data dir (a Docker volume), not the read-only image dir.
+const LEAD_PATH = path.join(DATA_DIR, "lead_capture.json");
 
 // Default trigger: ask after this many Q&A turns when no .env override is set.
 export const DEFAULT_ASK_AFTER_TURNS = 3;
@@ -51,5 +52,6 @@ export function saveLeadCapture({ instruction, askAfterTurns } = {}) {
     instruction: String(instruction ?? "").trim(),
     askAfterTurns: Number.isInteger(n) && n > 0 ? n : envDefaultTurns(),
   };
+  fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(LEAD_PATH, JSON.stringify(out, null, 2) + "\n", "utf8");
 }
