@@ -45,6 +45,10 @@ for (const [name, value] of Object.entries({
 }
 
 const GRAPH_API = "https://graph.facebook.com/v21.0";
+// Send API target. A Page access token resolves "me" to the Page, but a System User token does
+// not (me = the system user, which can't send), causing a code 100 / subcode 33 error. Posting to
+// the explicit Page ID works for both token types, so prefer FB_PAGE_ID when set.
+const SEND_TARGET = FB_PAGE_ID || "me";
 const MODEL = "gemini-3.1-flash-lite"; // fast + cheap, ideal for short FAQ replies + tool calls
 
 const LEADS_ON = isLeadConfigured();
@@ -554,7 +558,7 @@ async function askGemini(session, userText, { askContact = false } = {}) {
 // Send a sender action (mark_seen / typing_on / typing_off) to the Messenger user.
 async function sendAction(recipientId, action) {
   try {
-    const res = await fetch(`${GRAPH_API}/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+    const res = await fetch(`${GRAPH_API}/${SEND_TARGET}/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -572,7 +576,7 @@ async function sendAction(recipientId, action) {
 
 async function sendMessage(recipientId, text) {
   try {
-    const res = await fetch(`${GRAPH_API}/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+    const res = await fetch(`${GRAPH_API}/${SEND_TARGET}/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
