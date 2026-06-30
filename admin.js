@@ -1043,6 +1043,33 @@ function toArray(x) {
   return [];
 }
 
+// Turn a save failure into a clear, actionable page instead of Express's blank
+// "Internal Server Error". The usual culprit in production is a filesystem permission
+// error: the mounted data files aren't writable by the container's user (uid 1000).
+function sendSaveError(res, err) {
+  console.error("Admin save failed:", err);
+  const permission = err && (err.code === "EACCES" || err.code === "EROFS" || err.code === "EPERM");
+  const detail = permission
+    ? `The bot couldn't write to its data files${err.path ? ` (“${err.path}”)` : ""}. ` +
+      `This is a permissions issue on the server, not your edit. On the server, in the project ` +
+      `directory, make the mounted files writable by the container user and try again:`
+    : (err && err.message) || "Unknown error while saving.";
+  const fix = "sudo chown -R 1000:1000 data knowledge_base.json knowledge_base.md";
+  res
+    .status(500)
+    .type("html")
+    .send(
+      `<!doctype html><meta charset="utf-8"><title>Couldn't save</title>` +
+        `<body style="font-family:system-ui,sans-serif;max-width:660px;margin:48px auto;padding:0 18px;color:#1a2433">` +
+        `<h1 style="font-size:20px">Couldn't save your changes</h1>` +
+        `<p>${esc(detail)}</p>` +
+        (permission
+          ? `<pre style="background:#f3f5f8;padding:12px 14px;border-radius:8px;overflow:auto">${esc(fix)}</pre>`
+          : "") +
+        `<p><a href="javascript:history.back()">← Go back</a></p></body>`
+    );
+}
+
 function price(p) {
   return { offer: (p?.offer ?? "").trim(), regular: (p?.regular ?? "").trim() };
 }
@@ -1171,10 +1198,14 @@ export function createAdminRouter({ adminUsername, adminPassword, sessionSecret,
   });
 
   router.post("/save", requireAuth, requireCsrf, (req, res) => {
-    const kb = formToKb(req.body ?? {});
-    saveKb(kb);
-    if (typeof onSaved === "function") onSaved();
-    res.redirect("/?saved=1");
+    try {
+      const kb = formToKb(req.body ?? {});
+      saveKb(kb);
+      if (typeof onSaved === "function") onSaved();
+      res.redirect("/?saved=1");
+    } catch (err) {
+      sendSaveError(res, err);
+    }
   });
 
   // The bot's voice — system prompt + scripted messages — on its own page, each in its own
@@ -1190,15 +1221,19 @@ export function createAdminRouter({ adminUsername, adminPassword, sessionSecret,
   });
 
   router.post("/system-prompt", requireAuth, requireCsrf, (req, res) => {
-    saveSystemPrompt(req.body?.systemPrompt ?? "");
-    savePromptSections(toArray(req.body?.promptSections));
-    saveLeadCapture({
-      instruction: req.body?.leadInstruction ?? "",
-      askAfterTurns: req.body?.leadAskAfterTurns,
-    });
-    saveAnsweringRules(req.body?.answeringRules ?? "");
-    if (typeof onSaved === "function") onSaved();
-    res.redirect("/system-prompt?saved=1");
+    try {
+      saveSystemPrompt(req.body?.systemPrompt ?? "");
+      savePromptSections(toArray(req.body?.promptSections));
+      saveLeadCapture({
+        instruction: req.body?.leadInstruction ?? "",
+        askAfterTurns: req.body?.leadAskAfterTurns,
+      });
+      saveAnsweringRules(req.body?.answeringRules ?? "");
+      if (typeof onSaved === "function") onSaved();
+      res.redirect("/system-prompt?saved=1");
+    } catch (err) {
+      sendSaveError(res, err);
+    }
   });
 
   return router;
